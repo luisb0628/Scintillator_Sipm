@@ -1,0 +1,20 @@
+/control/verbose 0
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+
+# ── Tipo de centellador ───────────────────────────────────────────────────────
+/scint/type BGO
+
+# ── Sin /gun/inputFile → usa gun estándar (modo calibración) ─────────────────
+# Por defecto: gamma de 662 keV (Cs-137), posición z=-1 cm, dirección +z
+# Puedes cambiar la partícula y energía con los comandos siguientes:
+/gun/particle gamma
+/gun/energy 662 keV
+/gun/position 0 0 -1 cm
+/gun/direction 0 0 1
+
+/run/initialize
+
+# 10000 eventos (~5 min). Aumenta a 50000-100000 para mejor estadística.
+/run/beamOn 1000000

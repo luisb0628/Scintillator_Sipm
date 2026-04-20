@@ -2,6 +2,7 @@
 #define RunAction_h 1
 
 #include "G4UserRunAction.hh"
+#include "G4Timer.hh"
 #include "globals.hh"
 #include <fstream>
 
@@ -16,7 +17,10 @@ public:
     virtual void BeginOfRunAction(const G4Run*);
     virtual void EndOfRunAction(const G4Run*);
 
-    std::ofstream outputFile; // opcional
+    std::ofstream outputFile;
+
+private:
+    G4Timer fTimer;
 };
 
 #endif

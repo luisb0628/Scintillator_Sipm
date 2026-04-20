@@ -1,0 +1,17 @@
+/control/verbose 0
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+
+# ── Tipo de centellador ───────────────────────────────────────────────────────
+/scint/type BGO
+
+# ── Fuente: partículas de Film_graphene ───────────────────────────────────────
+# Ruta relativa al directorio BUILD del ejecutable.
+# Cambia el archivo para usar otro espesor o % de boro.
+/gun/inputFile ../../Film_graphene/build/generated_particles.txt
+
+/run/initialize
+
+# Número de eventos = grupos de captura en el archivo (se cicla si pones más)
+/run/beamOn 10000

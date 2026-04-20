@@ -12,6 +12,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 set(SOURCES
     src/ActionInitialization.cc
     src/DetectorConstruction.cc
+    src/EventAction.cc
     src/PrimaryGeneratorAction.cc
     src/RunAction.cc
     src/ScintSD.cc
@@ -24,11 +25,8 @@ add_executable(Scintillator_Sipm main.cc ${SOURCES})
 # --- Enlazar librerías de Geant4 ---
 target_link_libraries(Scintillator_Sipm ${Geant4_LIBRARIES})
 
-# --- Copiar macros automáticamente al build ---
-file(GLOB MACRO_FILES "${PROJECT_SOURCE_DIR}/macros/*.mac")
-foreach(_file ${MACRO_FILES})
-    configure_file(${_file} ${PROJECT_BINARY_DIR}/macros/ COPYONLY)
-endforeach()
+# --- Copiar directorio de macros al build ---
+file(COPY ${PROJECT_SOURCE_DIR}/macros DESTINATION ${PROJECT_BINARY_DIR})
 
 # --- Mensajes informativos ---
 message(STATUS "Geant4 found at: ${Geant4_DIR}")

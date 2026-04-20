@@ -12,14 +12,23 @@ class ScintSD : public G4VSensitiveDetector
 {
 public:
     ScintSD(const G4String& name);
-    virtual ~ScintSD();
+    ~ScintSD() override;
 
-    virtual void Initialize(G4HCofThisEvent*);
-    virtual G4bool ProcessHits(G4Step*, G4TouchableHistory*);
-    virtual void EndOfEvent(G4HCofThisEvent*);
+    void Initialize(G4HCofThisEvent*) override;
+    G4bool ProcessHits(G4Step*, G4TouchableHistory*) override;
+    void EndOfEvent(G4HCofThisEvent*) override;
 
 private:
-    // Acumulador de energía por TrackID en este evento
+    // Edep acumulado por tipo de partícula (por evento)
+    G4double fEdepTotal   = 0.;
+    G4double fEdepAlpha   = 0.;
+    G4double fEdepLi7     = 0.;
+    G4double fEdepGamma   = 0.;   // gammas + electrones secundarios
+
+    // Conteo de fotones ópticos generados en este evento
+    G4int fNOptPhotons = 0;
+
+    // Edep por TrackID (para ntuple 0 detallado)
     std::map<G4int, G4double> fEdepPerTrack;
 };
 

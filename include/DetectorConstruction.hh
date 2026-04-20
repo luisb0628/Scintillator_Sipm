@@ -1,19 +1,15 @@
-// DetectorConstruction.hh
 #ifndef DETECTORCONSTRUCTION_HH
 #define DETECTORCONSTRUCTION_HH
 
 #include "G4VUserDetectorConstruction.hh"
+#include "G4GenericMessenger.hh"
 #include "globals.hh"
 
 class G4VPhysicalVolume;
 class G4Material;
+class G4LogicalVolume;
 
-enum class ScintType {
-    PLASTIC,
-    BGO,
-    CSI,
-    LYSO
-};
+enum class ScintType { PLASTIC, BGO, CSI, LYSO };
 
 class DetectorConstruction : public G4VUserDetectorConstruction
 {
@@ -24,17 +20,20 @@ public:
     G4VPhysicalVolume* Construct() override;
     void ConstructSDandField() override;
 
-    // Setter (sin macro, lo usas desde main.cc)
-    void SetScintType(ScintType t) { fScintType = t; }
+    // Configurable desde macro: /scint/type BGO|PLASTIC|CSI|LYSO
+    void SetScintTypeByName(const G4String& name);
 
 private:
-    G4Material* CreateScintillatorMaterial();
-    void DefineOpticalProperties(G4Material* scintMat);
+    G4Material* BuildScintMaterial();
+    void        AddOpticalProperties(G4Material* mat);
+    void        DefineCommands();
 
-    ScintType fScintType;
+    ScintType  fScintType  = ScintType::BGO;
 
-    // Para guardar punteros a volúmenes físicos si quieres más adelante
-    G4VPhysicalVolume* fPhysWorld = nullptr;
+    G4LogicalVolume* fLogicScint = nullptr;
+    G4LogicalVolume* fLogicSiPM  = nullptr;
+
+    G4GenericMessenger* fMessenger = nullptr;
 };
 
 #endif
