@@ -196,19 +196,6 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
     visSiPM->SetForceSolid(true);
     fLogicSiPM->SetVisAttributes(visSiPM);
 
-    // Bloque de plomo detrás del SiPM: retrodispersa gammas que atraviesan el cristal
-    // y genera el pico de backscattering (~184 keV para Cs-137 de 662 keV)
-    G4double pbHalfZ = 2.*cm;
-    G4double pbZpos  = sipmZpos + sipmZ/2. + pbHalfZ;
-    auto* pbMat    = nist->FindOrBuildMaterial("G4_Pb");
-    auto* solidPb  = new G4Box("PbBacking", 5.*cm, 5.*cm, pbHalfZ);
-    auto* logicPb  = new G4LogicalVolume(solidPb, pbMat, "PbBacking");
-    new G4PVPlacement(nullptr, {0,0,pbZpos}, logicPb, "PbBacking", logicWorld, false, 0);
-
-    auto* visPb = new G4VisAttributes(G4Colour(0.5,0.5,0.5,0.6));
-    visPb->SetForceSolid(true);
-    logicPb->SetVisAttributes(visPb);
-
     // Superficie óptica centellador→SiPM: dielectric_dielectric polished.
     // Esto ANULA la envoltura de Teflon en esta cara concreta (border > skin).
     // Con n_Si = n_BGO la reflexión de Fresnel es 0 %: todos los fotones entran al SiPM.

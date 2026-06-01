@@ -17,4 +17,4 @@
 /run/initialize
 
 # 10000 eventos (~5 min). Aumenta a 50000-100000 para mejor estadística.
-/run/beamOn 1000000
+/run/beamOn 10000

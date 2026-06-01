@@ -1,3 +1,17 @@
+# Compilación
 build/
+
+# Análisis
 Analysis/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
 python/
+
+# Archivos temporales del editor
+*.swp
+*.swo
+*~

@@ -1,110 +1,167 @@
-# Simulación de Scintilador + SiPM y Captura de Neutrones en Grafeno Dopado con Boro (Geant4)
+# Centellador + SiPM para Detección de Partículas Secundarias (Geant4)
 
-Este repositorio contiene el modelo Monte Carlo en **Geant4** para estudiar un sistema completo de detección de neutrones térmicos usando:
+Simulación Monte Carlo en **Geant4** de un sistema de detección que acopla un **cristal centellador** a un **SiPM**, diseñado para detectar las partículas secundarias producidas por la captura de neutrones en grafeno dopado con boro.
 
-- **Moderador de parafina** (fase de termalización)
-- **Convertidor delgado** de **grafeno dopado con boro** sobre **Kapton** (fase de captura)
-- **Cristales centelladores** (BGO o plástico)
-- **Sensores SiPM** (fase de detección óptica)
+Este proyecto es la **tercera etapa** de una cadena de simulación:
 
-El objetivo es simular todas las etapas del proceso: termalización, captura, generación de partículas secundarias, centelleo, transporte óptico y detección por SiPM.
+1. **Neutron_Thermalization** — genera `AmBePhaseSpace.root`
+2. **Film_graphene** — genera `generated_particles.txt` y `transmitted_particles.txt`
+3. **Scintillator_Sipm** (este repo) — detecta las partículas secundarias en el centellador
 
-Este proyecto complementa los repositorios anteriores de captura y termalización:
-https://github.com/luisb0628/neutron-thermalization-geant4  
-https://github.com/luisb0628/neutron-capture-boron-graphene
+---
+
+## Modos de operación
+
+| Macro | Fuente | Uso |
+|-------|--------|-----|
+| `macros/run_calibration.mac` | Pistola estándar (gamma 662 keV, Cs-137) | Calibración del sistema |
+| `macros/run_transmitted.mac` | `transmitted_particles.txt` de Film_graphene | Simulación completa de la cadena |
+| `macros/run.mac` | Configurable | General |
 
 ---
 
 ## Contenido del repositorio
 
+```
 .
 ├── CMakeLists.txt
 ├── main.cc
-├── include/                 # Clases del detector y acciones
-│   ├── DetectorConstruction.hh
-│   ├── PrimaryGeneratorAction.hh
+├── include/
+│   ├── DetectorConstruction.hh   # Geometría centellador + SiPM; 4 tipos de centellador
+│   ├── PrimaryGeneratorAction.hh # Lee transmitted_particles.txt o usa pistola estándar
+│   ├── ScintSD.hh                # Detector sensible del centellador
+│   ├── OpticalSiPM_SD.hh         # Detector óptico del SiPM
 │   ├── RunAction.hh
 │   ├── EventAction.hh
-│   ├── SteppingAction.hh
-│   ├── ScintSD.hh
-│   └── OpticalSiPM_SD.hh
+│   └── ActionInitialization.hh
 ├── src/
-│   ├── DetectorConstruction.cc
-│   ├── PrimaryGeneratorAction.cc
-│   ├── RunAction.cc
-│   ├── EventAction.cc
-│   ├── SteppingAction.cc
-│   ├── ScintSD.cc
-│   └── OpticalSiPM_SD.cc
-├── macros/
-├── materials/
-└── README.md
+└── macros/
+    ├── run.mac                   # Macro general
+    ├── run_calibration.mac       # Calibración con gamma 662 keV
+    ├── run_transmitted.mac       # Fuente: transmitted_particles.txt de Film_graphene
+    └── vis1.mac                  # Visualización
+```
+
+---
+
+## Tipos de centellador
+
+El tipo se configura con `/scint/type` antes de `/run/initialize`:
+
+| Tipo | Pico emisión | Índice refracción | Yield (fotones/MeV) | τ (ns) |
+|------|-------------|-------------------|---------------------|--------|
+| `BGO` (default) | 485 nm | 2.15 | 8 200 | 300 |
+| `PLASTIC` | 425 nm | 1.58 | 10 000 | 2.1 |
+| `CSI` | 550 nm | 1.80 | 54 000 | 1 000 |
+| `LYSO` | 440 nm | 1.82 | 32 000 | 40 |
 
 ---
 
 ## Requisitos
 
-- Geant4 ≥ 10.7 (ideal 11.3+) con física HP y Optical Physics  
-- CMake ≥ 3.10  
-- g++ / clang  
-- ROOT (opcional)  
-- Python 3 con numpy, uproot, matplotlib, pandas (opcional)
+- **Geant4** ≥ 10.7 compilado con `ui_all`, `vis_all`, `analysis` y Optical Physics
+- **CMake** ≥ 3.16, **C++17**
+- **Python 3** con: `uproot`, `numpy`, `pandas`, `matplotlib` (opcional)
+- `transmitted_particles.txt` generado por Film_graphene (para `run_transmitted.mac`)
 
 ---
 
 ## Compilación
 
-mkdir build
-cd build
+```bash
+source /path/to/geant4/install/bin/geant4.sh
+mkdir -p build && cd build
 cmake ..
-make -j4
+make -j$(nproc)
+```
 
 ---
 
 ## Ejecución
 
-./Scintillator_Sipm macros/run.mac  
-./Scintillator_Sipm macros/vis.mac  
+### Calibración (sin Film_graphene)
 
-Parámetros:
-- /run/beamOn N
-- Energía de neutrones
-- Tipo de centellador
-- Activación de óptica
+```bash
+cd build
+./Scintillator_Sipm ../macros/run_calibration.mac
+```
+
+Dispara gammas de 662 keV (Cs-137) directamente al centellador.
+
+### Cadena completa (con Film_graphene)
+
+Primero genera `transmitted_particles.txt` con Film_graphene, luego:
+
+```bash
+cd build
+./Scintillator_Sipm ../macros/run_transmitted.mac
+```
+
+Lee todas las partículas que llegaron al detector de grafeno (alfa, Li-7, gamma 478 keV, neutrones dispersados, etc.) y las simula en el centellador.
+
+### Modo interactivo
+
+```bash
+cd build
+./Scintillator_Sipm
+```
 
 ---
 
-## Componentes del código
+## Comandos del macro
 
-DetectorConstruction → Geometría del moderador, grafeno, Kapton, centellador y SiPM  
-PrimaryGeneratorAction → Fuente de neutrones térmicos  
-Sensitive Detectors → ScintSD y OpticalSiPM_SD  
-Run / Event / Stepping Actions → Registro de energía, fotones y partículas secundarias  
+```bash
+# Tipo de centellador
+/scint/type BGO          # BGO | PLASTIC | CSI | LYSO
+
+# Modo calibración (pistola estándar)
+/gun/particle gamma
+/gun/energy 662 keV
+/gun/position 0 0 -1 cm
+/gun/direction 0 0 1
+
+# Modo cadena completa (phase space de Film_graphene)
+/gun/transmittedFile ../../Film_graphene/build/transmitted_particles_kaptonfirst.txt
+
+/run/initialize
+/run/beamOn 10000
+```
 
 ---
 
 ## Resultados generados
 
-- Espectros de energía en el centellador  
-- Conteo de fotones en el SiPM  
-- Distribuciones espaciales  
-- Espectros α, Li-7, γ 478 keV en grafeno dopado con boro  
+- Espectros de deposición de energía en el centellador
+- Conteo de fotones ópticos detectados por el SiPM
+- Distribuciones espaciales
+- Espectros de α, Li-7 y gamma 478 keV (captura B-10)
+
+---
+
+## Estructura del código
+
+| Clase | Responsabilidad |
+|-------|----------------|
+| `DetectorConstruction` | Geometría centellador + SiPM; propiedades ópticas por tipo |
+| `PrimaryGeneratorAction` | Pistola estándar o lectura de `transmitted_particles.txt` |
+| `ScintSD` | Registra deposición de energía y fotones en el centellador |
+| `OpticalSiPM_SD` | Detecta fotones ópticos en el SiPM |
+| `RunAction` | Gestiona archivos de salida ROOT/CSV |
+| `EventAction` | Inicialización por evento |
 
 ---
 
 ## Trabajo futuro
 
-- PDE realista del SiPM  
-- Crosstalk y afterpulsing  
-- Variación de dopaje  
-- Integración con kits CAEN  
+- PDE realista del SiPM
+- Crosstalk y afterpulsing
+- Variación del dopaje de boro
+- Integración con kits CAEN
 
 ---
 
-## Autor
+## Contacto
 
-Luis Ricardo Beltrán García  
-Maestría en Ingeniería Física – UAN  
-lbeltran151@uan.edu.co
-
----
+Proyecto desarrollado por **Luis Ricardo Beltrán García**  
+Maestría en Ingeniería Física — UAN  
+lbeltran151@uan.edu.mx
