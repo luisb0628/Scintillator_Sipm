@@ -40,16 +40,17 @@ void DetectorConstruction::DefineCommands()
                                         "Configuracion del centellador");
     fMessenger->DeclareMethod("type",
         &DetectorConstruction::SetScintTypeByName,
-        "Tipo de centellador: BGO | PLASTIC | CSI | LYSO")
+        "Tipo de centellador: BGO | PLASTIC | CSI | LYSO | PLASTIC_B")
         .SetParameterName("type", false);
 }
 
 void DetectorConstruction::SetScintTypeByName(const G4String& name)
 {
-    if      (name=="BGO"     || name=="bgo")     fScintType = ScintType::BGO;
-    else if (name=="PLASTIC" || name=="plastic")  fScintType = ScintType::PLASTIC;
-    else if (name=="CSI"     || name=="csi")      fScintType = ScintType::CSI;
-    else if (name=="LYSO"    || name=="lyso")     fScintType = ScintType::LYSO;
+    if      (name=="BGO"     || name=="bgo")                        fScintType = ScintType::BGO;
+    else if (name=="PLASTIC" || name=="plastic")                    fScintType = ScintType::PLASTIC;
+    else if (name=="CSI"     || name=="csi")                        fScintType = ScintType::CSI;
+    else if (name=="LYSO"    || name=="lyso")                       fScintType = ScintType::LYSO;
+    else if (name=="PLASTIC_B"|| name=="plastic_b" || name=="PlasticB") fScintType = ScintType::PLASTIC_B;
     else { G4cerr<<"[Detector] Tipo desconocido: "<<name<<". Usando BGO.\n";
            fScintType = ScintType::BGO; }
 }
@@ -64,16 +65,21 @@ void DetectorConstruction::AddOpticalProperties(G4Material* mat)
     switch (fScintType) {
         case ScintType::BGO:
             peakEv=2.56*eV; sigmaEv=0.25*eV; rindexVal=2.15;
-            absLenCm=25.; yieldPerMeV=8200.; tauNs=300.; break;
+            absLenCm=25.;  yieldPerMeV=8200.;  tauNs=300.; break;
         case ScintType::PLASTIC:
             peakEv=2.92*eV; sigmaEv=0.20*eV; rindexVal=1.58;
-            absLenCm=380.; yieldPerMeV=10000.; tauNs=2.1; break;
+            absLenCm=380.; yieldPerMeV=10000.; tauNs=2.1;  break;
         case ScintType::CSI:
             peakEv=2.25*eV; sigmaEv=0.30*eV; rindexVal=1.80;
             absLenCm=100.; yieldPerMeV=54000.; tauNs=1000.; break;
         case ScintType::LYSO:
             peakEv=2.82*eV; sigmaEv=0.22*eV; rindexVal=1.82;
-            absLenCm=40.; yieldPerMeV=32000.; tauNs=40.; break;
+            absLenCm=40.;  yieldPerMeV=32000.; tauNs=40.;  break;
+        case ScintType::PLASTIC_B:
+            // Plástico dopado con B-10 (equiv. EJ-254 / BC-454):
+            // misma emisión que PVT pero ~65% del rendimiento por el dopaje
+            peakEv=2.92*eV; sigmaEv=0.20*eV; rindexVal=1.58;
+            absLenCm=200.; yieldPerMeV=6500.; tauNs=2.5; break;
     }
 
     const G4double Emin=1.5*eV, Emax=4.1*eV;
@@ -97,8 +103,15 @@ void DetectorConstruction::AddOpticalProperties(G4Material* mat)
     mpt->AddConstProperty("SCINTILLATIONYIELD1",        1.0);
 
     if (mat->GetIonisation()) {
-        G4double birks = (fScintType==ScintType::PLASTIC) ? 0.126*mm/MeV
-                                                           : 0.012*mm/MeV;
+        G4double birks;
+        switch (fScintType) {
+            case ScintType::PLASTIC: birks = 0.126*mm/MeV; break;
+            case ScintType::BGO:     birks = 0.012*mm/MeV; break;
+            case ScintType::LYSO:    birks = 0.008*mm/MeV; break;
+            case ScintType::CSI:     birks = 0.010*mm/MeV; break;
+            case ScintType::PLASTIC_B:birks = 0.126*mm/MeV;  break;
+            default:                  birks = 0.012*mm/MeV;  break;
+        }
         mat->GetIonisation()->SetBirksConstant(birks);
     }
     mat->SetMaterialPropertiesTable(mpt);
@@ -112,7 +125,33 @@ G4Material* DetectorConstruction::BuildScintMaterial()
         case ScintType::BGO:     mat = nist->FindOrBuildMaterial("G4_BGO");                      break;
         case ScintType::PLASTIC: mat = nist->FindOrBuildMaterial("G4_PLASTIC_SC_VINYLTOLUENE");  break;
         case ScintType::CSI:     mat = nist->FindOrBuildMaterial("G4_CESIUM_IODIDE");            break;
-        case ScintType::LYSO:    mat = nist->FindOrBuildMaterial("G4_LSO");                      break;
+        case ScintType::LYSO: {
+            // Lu1.8 Y0.2 SiO5 (LYSO:Ce), densidad 7.1 g/cm3
+            // G4_LSO no existe en NIST — construir manualmente
+            mat = new G4Material("LYSO_Ce", 7.1*g/cm3, 4);
+            mat->AddElement(nist->FindOrBuildElement("Lu"), 0.7144);
+            mat->AddElement(nist->FindOrBuildElement("Y"),  0.0403);
+            mat->AddElement(nist->FindOrBuildElement("Si"), 0.0637);
+            mat->AddElement(nist->FindOrBuildElement("O"),  0.1816);
+            break;
+        }
+        case ScintType::PLASTIC_B: {
+            // Plástico vinyltolueno dopado con 5 % en masa de B-10 enriquecido (100 %)
+            // Base PVT: H=8.47 %, C=91.53 % → escalados a (1-0.05) para hacer espacio al boro
+            const G4double bFrac = 0.05;
+            const G4double hFrac = 0.0847 * (1. - bFrac);
+            const G4double cFrac = 0.9153 * (1. - bFrac);
+
+            auto* isoB10 = new G4Isotope("B10_plastic", 5, 10, 10.013*g/mole);
+            auto* elB10  = new G4Element("B10enr_plastic", "B10p", 1);
+            elB10->AddIsotope(isoB10, 100.*perCent);
+
+            mat = new G4Material("BoronPlastic_5pct", 1.05*g/cm3, 3);
+            mat->AddElement(nist->FindOrBuildElement("H"), hFrac);
+            mat->AddElement(nist->FindOrBuildElement("C"), cFrac);
+            mat->AddElement(elB10, bFrac);
+            break;
+        }
     }
     AddOpticalProperties(mat);
     return mat;
@@ -140,10 +179,10 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
 
     // Dimensiones del centellador
     G4double scintX,scintY,scintZ;
-    if (fScintType==ScintType::PLASTIC) {
+    if (fScintType==ScintType::PLASTIC || fScintType==ScintType::PLASTIC_B) {
         scintX=4.7*cm; scintY=4.7*cm; scintZ=1.0*cm;
     } else {
-        scintX=6.*mm; scintY=6.*mm; scintZ=15.*mm;
+        scintX=6.*mm; scintY=6.*mm; scintZ=15.*mm;  // BGO, LYSO, CSI, NAI
     }
     G4double scintHalfZ = scintZ/2.;
     G4double scintZpos  = scintHalfZ;   // cara de entrada en z=0
@@ -180,8 +219,17 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
     G4double sipmZpos = scintZpos + scintHalfZ + sipmZ/2.;
     auto* sipmMat   = nist->FindOrBuildMaterial("G4_Si");
     {
-        // n_Si igualado al del BGO → reflexión de Fresnel = 0 % (acoplamiento óptico ideal)
-        G4double eSi[2]={1.5*eV,4.1*eV}, rSi[2]={2.15,2.15}, aSi[2]={0.001*mm,0.001*mm};
+        // n_SiPM = n_centellador → reflexión de Fresnel = 0 % (acoplamiento óptico ideal con grasa)
+        G4double sipmN;
+        switch (fScintType) {
+            case ScintType::BGO:     sipmN = 2.15; break;
+            case ScintType::PLASTIC: sipmN = 1.58; break;
+            case ScintType::CSI:     sipmN = 1.80; break;
+            case ScintType::LYSO:    sipmN = 1.82; break;
+            case ScintType::PLASTIC_B:sipmN = 1.58; break;
+            default:                  sipmN = 1.50; break;
+        }
+        G4double eSi[2]={1.5*eV,4.1*eV}, rSi[2]={sipmN,sipmN}, aSi[2]={0.001*mm,0.001*mm};
         auto* mSi = new G4MaterialPropertiesTable();
         mSi->AddProperty("RINDEX",   eSi,rSi,2);
         mSi->AddProperty("ABSLENGTH",eSi,aSi,2);
@@ -219,8 +267,8 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
     region->AddRootLogicalVolume(fLogicScint);
     region->SetProductionCuts(cuts);
 
-    // Orden debe coincidir con el enum: PLASTIC=0, BGO=1, CSI=2, LYSO=3
-    const char* names[] = {"PLASTIC","BGO","CsI:Tl","LYSO:Ce"};
+    // Orden debe coincidir con el enum: PLASTIC=0, BGO=1, CSI=2, LYSO=3, PLASTIC_B=4
+    const char* names[] = {"PLASTIC","BGO","CsI:Tl","LYSO:Ce","Plastic-B10(5%%)"};
     G4cout << "\n[Detector] Centellador: " << names[(int)fScintType]
            << "  " << scintX/mm << "x" << scintY/mm << "x" << scintZ/mm
            << " mm\n" << G4endl;

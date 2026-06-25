@@ -9,7 +9,7 @@ class G4VPhysicalVolume;
 class G4Material;
 class G4LogicalVolume;
 
-enum class ScintType { PLASTIC, BGO, CSI, LYSO };
+enum class ScintType { PLASTIC, BGO, CSI, LYSO, PLASTIC_B };
 
 class DetectorConstruction : public G4VUserDetectorConstruction
 {
@@ -20,7 +20,7 @@ public:
     G4VPhysicalVolume* Construct() override;
     void ConstructSDandField() override;
 
-    // Configurable desde macro: /scint/type BGO|PLASTIC|CSI|LYSO
+    // Configurable desde macro: /scint/type BGO|PLASTIC|CSI|LYSO|NAI|PLASTIC_B
     void SetScintTypeByName(const G4String& name);
 
 private:

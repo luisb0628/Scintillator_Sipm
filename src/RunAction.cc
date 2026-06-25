@@ -1,7 +1,9 @@
 #include "RunAction.hh"
+#include "EventAction.hh"
 #include "G4Run.hh"
 #include "G4AnalysisManager.hh"
 #include "G4SystemOfUnits.hh"
+#include "G4Threading.hh"
 #include "G4ios.hh"
 #include <iomanip>
 
@@ -12,104 +14,65 @@ void RunAction::BeginOfRunAction(const G4Run*)
 {
     auto* am = G4AnalysisManager::Instance();
     am->SetVerboseLevel(0);
+    am->SetNtupleMerging(true);
     fTimer.Start();
+    // Resetear barra de progreso (necesario si se lanza más de un /run/beamOn)
+    if (G4Threading::IsMasterThread())
+        EventAction::ResetProgress();
+
     am->OpenFile("output.root");
 
     // ================================================================
-    // HISTOGRAMAS TH1 — visibles directamente en TBrowser de ROOT
+    // NTUPLE 0 — ScintEvent: un row por evento
+    //   TotalEdep y nOptPhotons son verificación de consistencia:
+    //   TotalEdep [keV] × yield [ph/MeV] × eficiencia_óptica ≈ nOptPhotons ≈ nPE_total / PDE
     // ================================================================
-    // H1 ID=0  Espectro de energía depositada total (lo que "absorbe" el cristal)
-    am->CreateH1("Edep_keV",
-                 "Energia depositada total en centellador;Edep (keV);Cuentas",
-                 500, 0., 10000.);                               // ID=0
-
-    // H1 ID=1  Espectro de fotoelectrones (señal real del SiPM)
-    am->CreateH1("nPhotoelectrons",
-                 "Fotoelectrones detectados por SiPM;N_{PE};Cuentas",
-                 500, 0., 50000.);                               // ID=1
-
-    // H1 ID=2  Edep solo de alfas (quenching de Birks reduce su señal)
-    am->CreateH1("Edep_alpha_keV",
-                 "Edep de particulas #alpha;Edep (keV);Cuentas",
-                 300, 0., 6000.);                                // ID=2
-
-    // H1 ID=3  Edep solo de Li-7
-    am->CreateH1("Edep_Li7_keV",
-                 "Edep de iones Li-7;Edep (keV);Cuentas",
-                 300, 0., 3000.);                                // ID=3
-
-    // H1 ID=4  Edep solo de gammas (y electrones secundarios)
-    am->CreateH1("Edep_gamma_keV",
-                 "Edep de gammas / e^{#pm};Edep (keV);Cuentas",
-                 300, 0., 3000.);                                // ID=4
-
-    // H1 ID=5  Fotones ópticos GENERADOS por evento (antes de PDE)
-    am->CreateH1("nOptPhotons_gen",
-                 "Fotones opticos generados por evento;N_{fotones};Cuentas",
-                 500, 0., 100000.);                              // ID=5
-
-    // ================================================================
-    // NTUPLE 0 — ScintData (Edep por step)
-    // ================================================================
-    am->CreateNtuple("ScintData", "Edep por step en el centellador");
+    am->CreateNtuple("ScintEvent", "Energia depositada y fotones opticos por evento");
     am->CreateNtupleIColumn("EventID");           // 0
-    am->CreateNtupleIColumn("TrackID");           // 1
-    am->CreateNtupleSColumn("Particle");          // 2
-    am->CreateNtupleDColumn("KineticEnergy_MeV"); // 3
-    am->CreateNtupleDColumn("Edep_MeV");          // 4
-    am->CreateNtupleDColumn("X_mm");              // 5
-    am->CreateNtupleDColumn("Y_mm");              // 6
-    am->CreateNtupleDColumn("Z_mm");              // 7
-    am->CreateNtupleSColumn("Creator");           // 8
+    am->CreateNtupleDColumn("TotalEdep_keV");     // 1
+    am->CreateNtupleIColumn("nOptPhotons");       // 2
     am->FinishNtuple();                           // ID=0
 
     // ================================================================
-    // NTUPLE 1 — ScintEvent (Edep total + por tipo de partícula por evento)
+    // NTUPLE 1 — SiPMData: fotones DETECTADOS por el SiPM
+    //   Solo los primeros 10 000 eventos — para análisis de forma de pulso (PSD)
+    //   y verificación del espectro óptico del centellador.
+    //   PrimaryParticle: categoría de la primaria original que causó el fotón
+    //   ("alpha","Li7","gamma","electron","neutron","proton","other")
     // ================================================================
-    am->CreateNtuple("ScintEvent", "Energia total por evento (histograma principal)");
+    am->CreateNtuple("SiPMData", "Fotones opticos detectados en SiPM (primeros 10000 eventos)");
     am->CreateNtupleIColumn("EventID");           // 0
-    am->CreateNtupleDColumn("TotalEdep_keV");     // 1  (cambiado a keV para facilidad)
-    am->CreateNtupleDColumn("Edep_alpha_keV");    // 2
-    am->CreateNtupleDColumn("Edep_Li7_keV");      // 3
-    am->CreateNtupleDColumn("Edep_gamma_keV");    // 4
-    am->CreateNtupleIColumn("nOptPhotons");       // 5  fotones ópticos generados
+    am->CreateNtupleSColumn("PrimaryParticle");   // 1
+    am->CreateNtupleDColumn("time_ns");           // 2
+    am->CreateNtupleDColumn("energy_eV");         // 3
     am->FinishNtuple();                           // ID=1
 
     // ================================================================
-    // NTUPLE 2 — SiPMData (fotones detectados individuales)
+    // NTUPLE 2 — SiPMSummary: señal del SiPM, todos los eventos
+    //   nPE_total  = fotoelectrones totales detectados por el SiPM (PDE=30%)
+    //   nPE_*      = fracción atribuida a cada primaria original
+    //
+    //   Nota importante de interpretación:
+    //   - Un gamma primario (ej. 478 keV) → crea electrón Compton
+    //     → ese electrón centellea → aparece en nPE_gamma (no en nPE_electron)
+    //   - nPE_electron: betas (Sr-90), Compton de un electrón PRIMARIO disparado
+    //     por el gun (calibración Cs-137/Co-60 solo en modo beta, etc.)
+    //   - La diferencia alpha/Li7 vs gamma es la base del análisis de señal de
+    //     captura B-10
     // ================================================================
-    am->CreateNtuple("SiPMData", "Fotones opticos detectados en SiPM");
-    am->CreateNtupleDColumn("time_ns");           // 0
-    am->CreateNtupleDColumn("energy_eV");         // 1
-    am->CreateNtupleDColumn("x_mm");              // 2
-    am->CreateNtupleDColumn("y_mm");              // 3
-    am->CreateNtupleDColumn("z_mm");              // 4
+    am->CreateNtuple("SiPMSummary", "Fotoelectrones por evento y por primaria origen");
+    am->CreateNtupleIColumn("EventID");           // 0
+    am->CreateNtupleIColumn("nPE_total");         // 1
+    am->CreateNtupleIColumn("nPE_alpha");         // 2
+    am->CreateNtupleIColumn("nPE_Li7");           // 3
+    am->CreateNtupleIColumn("nPE_gamma");         // 4
+    am->CreateNtupleIColumn("nPE_electron");      // 5
+    am->CreateNtupleIColumn("nPE_neutron");       // 6
+    am->CreateNtupleIColumn("nPE_proton");        // 7
+    am->CreateNtupleIColumn("nPE_other");         // 8
     am->FinishNtuple();                           // ID=2
 
-    // ================================================================
-    // NTUPLE 3 — SiPMSummary (fotoelectrones totales por evento)
-    // ================================================================
-    am->CreateNtuple("SiPMSummary", "Fotoelectrones por evento (espectro del SiPM)");
-    am->CreateNtupleIColumn("EventID");           // 0
-    am->CreateNtupleIColumn("nPhotoelectrons");   // 1
-    am->FinishNtuple();                           // ID=3
-
-    // ================================================================
-    // NTUPLE 4 — OpticalGen (fotones ópticos generados, detalles)
-    // ================================================================
-    am->CreateNtuple("OpticalGen", "Fotones opticos generados en centellador");
-    am->CreateNtupleIColumn("EventID");           // 0
-    am->CreateNtupleIColumn("ParentTrackID");     // 1
-    am->CreateNtupleSColumn("CreatorProcess");    // 2
-    am->CreateNtupleDColumn("energy_eV");         // 3
-    am->CreateNtupleDColumn("x_mm");              // 4
-    am->CreateNtupleDColumn("y_mm");              // 5
-    am->CreateNtupleDColumn("z_mm");              // 6
-    am->CreateNtupleDColumn("t_ns");              // 7
-    am->CreateNtupleSColumn("ParentParticle");    // 8
-    am->FinishNtuple();                           // ID=4
-
-    G4cout << "[RunAction] Output: output.root  (6 histogramas + 5 ntuples)\n";
+    G4cout << "[RunAction] Output: output.root  (3 ntuples: ScintEvent, SiPMData, SiPMSummary)\n";
 }
 
 void RunAction::EndOfRunAction(const G4Run* run)
@@ -125,11 +88,10 @@ void RunAction::EndOfRunAction(const G4Run* run)
     G4int m = (G4int)(real / 60) % 60;
     G4int s = (G4int)(real) % 60;
 
-    G4cout << "\n=== Simulación terminada ===\n";
+    G4cout << "\n=== Simulacion terminada ===\n";
     G4cout << "Eventos: " << run->GetNumberOfEvent() << "\n";
     G4cout << "Tiempo total: " << h << "h " << m << "m " << s << "s"
            << "  (" << std::fixed << std::setprecision(1) << real << " s)\n";
     G4cout << "Archivo: output.root\n";
-    G4cout << "Histogramas listos para TBrowser o analysis_scint.py\n";
     G4cout << "============================\n";
 }

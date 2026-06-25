@@ -1,6 +1,7 @@
 #pragma once
 
 #include <G4VSensitiveDetector.hh>
+#include "globals.hh"
 
 class OpticalSiPM_SD : public G4VSensitiveDetector
 {
@@ -13,6 +14,15 @@ public:
     virtual void EndOfEvent(G4HCofThisEvent*) override;
 
 private:
-    G4int fPhotonCount;        // número total de fotones detectados en este evento
-    G4double fPDE = 0.30;      // Photo Detection Efficiency (30%)
+    G4int    fPhotonCount  = 0;
+    G4double fPDE          = 0.30;
+
+    // Fotoelectrones por categoría de partícula que generó el fotón óptico
+    G4int fPE_alpha    = 0;
+    G4int fPE_Li7      = 0;
+    G4int fPE_gamma    = 0;
+    G4int fPE_electron = 0;
+    G4int fPE_neutron  = 0;
+    G4int fPE_proton   = 0;
+    G4int fPE_other    = 0;
 };

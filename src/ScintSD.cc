@@ -9,89 +9,94 @@
 #include "G4OpticalPhoton.hh"
 #include "G4VProcess.hh"
 
+G4ThreadLocal std::unordered_map<G4int, G4String>* ScintSD::sTrackParticle = nullptr;
+G4ThreadLocal std::unordered_map<G4int, G4int>*    ScintSD::sTrackParent   = nullptr;
+
 ScintSD::ScintSD(const G4String& name)
     : G4VSensitiveDetector(name)
 {}
 
 ScintSD::~ScintSD() {}
 
-// ─── Initialize por evento ────────────────────────────────────────────────────
+// Categoría canónica de partícula para los mapas de tracking
+static G4String Categorize(const G4String& pname)
+{
+    if (pname == "alpha")                               return "alpha";
+    if (pname.size() >= 3 && pname.substr(0,3)=="Li7") return "Li7";
+    if (pname == "gamma")                               return "gamma";
+    if (pname == "e-" || pname == "e+")                return "electron";
+    if (pname == "neutron")                             return "neutron";
+    if (pname == "proton")                              return "proton";
+    return "other";
+}
+
+// ---------------------------------------------------------------------------
+// Sube el árbol de parentesco hasta encontrar la partícula con parentID == 0
+// (la primaria original del evento) y devuelve su categoría.
+// Con esto, un gamma de 478 keV → Compton e- → fotón óptico queda como "gamma",
+// no como "electron".
+// ---------------------------------------------------------------------------
+G4String ScintSD::GetPrimaryForTrack(G4int trackID)
+{
+    if (!sTrackParticle || !sTrackParent) return "other";
+
+    G4int id = trackID;
+    for (int depth = 0; depth < 200; ++depth) {
+        auto pit = sTrackParent->find(id);
+        if (pit == sTrackParent->end() || pit->second == 0) {
+            // id tiene parentID=0 (es primaria) o no está registrado
+            auto cit = sTrackParticle->find(id);
+            return (cit != sTrackParticle->end()) ? cit->second : "other";
+        }
+        id = pit->second;
+    }
+    return "other";
+}
+
+// ─── Initialize — inicio de cada evento ──────────────────────────────────────
 void ScintSD::Initialize(G4HCofThisEvent*)
 {
-    fEdepTotal = fEdepAlpha = fEdepLi7 = fEdepGamma = 0.;
+    fEdepTotal   = 0.;
     fNOptPhotons = 0;
-    fEdepPerTrack.clear();
+
+    if (!sTrackParticle)
+        sTrackParticle = new std::unordered_map<G4int, G4String>();
+    sTrackParticle->clear();
+
+    if (!sTrackParent)
+        sTrackParent = new std::unordered_map<G4int, G4int>();
+    sTrackParent->clear();
 }
 
 // ─── ProcessHits ─────────────────────────────────────────────────────────────
 G4bool ScintSD::ProcessHits(G4Step* step, G4TouchableHistory*)
 {
-    auto* track  = step->GetTrack();
-    auto* pre    = step->GetPreStepPoint();
-    auto* am     = G4AnalysisManager::Instance();
+    auto* track = step->GetTrack();
 
-    const G4String pname = track->GetDefinition()->GetParticleName();
-
-    // ── Contar fotones ópticos generados en este step ──────────────────────────
+    // Contar fotones ópticos nacidos en este step
     for (auto* sec : *step->GetSecondaryInCurrentStep()) {
-        if (sec->GetDefinition() == G4OpticalPhoton::OpticalPhotonDefinition()) {
+        if (sec->GetDefinition() == G4OpticalPhoton::OpticalPhotonDefinition())
             ++fNOptPhotons;
-            // Ntuple 4 (OpticalGen) solo se llena para el primer evento
-            // como diagnóstico — evita archivos de GB con 40 M filas.
-            if (fNOptPhotons <= 10000 &&
-                G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID() == 0) {
-                const G4VProcess* proc = sec->GetCreatorProcess();
-                G4String procName = proc ? proc->GetProcessName() : "None";
-                G4int evID = 0;
-                am->FillNtupleIColumn(4, 0, evID);
-                am->FillNtupleIColumn(4, 1, track->GetTrackID());
-                am->FillNtupleSColumn(4, 2, procName);
-                am->FillNtupleDColumn(4, 3, sec->GetKineticEnergy() / eV);
-                am->FillNtupleDColumn(4, 4, sec->GetPosition().x() / mm);
-                am->FillNtupleDColumn(4, 5, sec->GetPosition().y() / mm);
-                am->FillNtupleDColumn(4, 6, sec->GetPosition().z() / mm);
-                am->FillNtupleDColumn(4, 7, sec->GetGlobalTime() / ns);
-                am->FillNtupleSColumn(4, 8, pname);
-                am->AddNtupleRow(4);
-            }
-        }
     }
 
-    // ── Fotones ópticos no depositan energía — saltar el resto ─────────────────
+    // Los fotones ópticos no depositan energía ni se registran en los mapas
     if (track->GetDefinition() == G4OpticalPhoton::OpticalPhotonDefinition())
         return false;
+
+    // Registrar trackID → (categoría, parentID).
+    // Se llama en cada step pero emplace no sobreescribe si la clave ya existe,
+    // así que solo registra la primera vez que el track pasa por el SD.
+    // NO se usa GetCurrentStepNumber()==1 porque ese contador es global para
+    // el track: un gamma disparado desde fuera del centellador tiene paso 1 en
+    // aire y llega al SD en paso 2 o mayor → con la condición nunca se registra.
+    sTrackParticle->emplace(track->GetTrackID(),
+                            Categorize(track->GetDefinition()->GetParticleName()));
+    sTrackParent->emplace(track->GetTrackID(), track->GetParentID());
 
     G4double edep = step->GetTotalEnergyDeposit();
     if (edep <= 0.) return false;
 
-    // ── Acumular Edep por tipo de partícula ────────────────────────────────────
     fEdepTotal += edep;
-    fEdepPerTrack[track->GetTrackID()] += edep;
-
-    // En Geant4: alpha → "alpha", Li-7 → "Li7[0.0]" (incluye energía de excitación)
-    if (pname == "alpha")
-        fEdepAlpha += edep;
-    else if (pname.substr(0,3) == "Li7")
-        fEdepLi7 += edep;
-    else  // gamma, e-, e+ → todos van a "gamma" (misma respuesta en centellador)
-        fEdepGamma += edep;
-
-    // ── Ntuple 0 — ScintData (detalle por step, solo primeros 100 eventos) ──────
-    G4int evID = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
-    if (evID < 100) {
-        const G4VProcess* creator = track->GetCreatorProcess();
-        am->FillNtupleIColumn(0, 0, evID);
-        am->FillNtupleIColumn(0, 1, track->GetTrackID());
-        am->FillNtupleSColumn(0, 2, pname);
-        am->FillNtupleDColumn(0, 3, pre->GetKineticEnergy() / MeV);
-        am->FillNtupleDColumn(0, 4, edep / MeV);
-        am->FillNtupleDColumn(0, 5, pre->GetPosition().x() / mm);
-        am->FillNtupleDColumn(0, 6, pre->GetPosition().y() / mm);
-        am->FillNtupleDColumn(0, 7, pre->GetPosition().z() / mm);
-        am->FillNtupleSColumn(0, 8, creator ? creator->GetProcessName() : "primary");
-        am->AddNtupleRow(0);
-    }
-
     return true;
 }
 
@@ -101,22 +106,9 @@ void ScintSD::EndOfEvent(G4HCofThisEvent*)
     auto* am  = G4AnalysisManager::Instance();
     G4int evID = G4RunManager::GetRunManager()->GetCurrentEvent()->GetEventID();
 
-    // ── Histogramas (visibles directamente en TBrowser) ──────────────────────
-    if (fEdepTotal > 0.) {
-        am->FillH1(0, fEdepTotal / keV);           // Edep total
-        if (fEdepAlpha > 0.) am->FillH1(2, fEdepAlpha / keV);
-        if (fEdepLi7   > 0.) am->FillH1(3, fEdepLi7   / keV);
-        if (fEdepGamma > 0.) am->FillH1(4, fEdepGamma / keV);
-    }
-    if (fNOptPhotons > 0)
-        am->FillH1(5, G4double(fNOptPhotons));     // fotones ópticos generados
-
-    // ── Ntuple 1 — ScintEvent (resumen por evento) ────────────────────────────
-    am->FillNtupleIColumn(1, 0, evID);
-    am->FillNtupleDColumn(1, 1, fEdepTotal / keV);
-    am->FillNtupleDColumn(1, 2, fEdepAlpha / keV);
-    am->FillNtupleDColumn(1, 3, fEdepLi7   / keV);
-    am->FillNtupleDColumn(1, 4, fEdepGamma / keV);
-    am->FillNtupleIColumn(1, 5, fNOptPhotons);
-    am->AddNtupleRow(1);
+    // Ntuple 0 — ScintEvent: TotalEdep + nOptPhotons por evento
+    am->FillNtupleIColumn(0, 0, evID);
+    am->FillNtupleDColumn(0, 1, fEdepTotal / keV);
+    am->FillNtupleIColumn(0, 2, fNOptPhotons);
+    am->AddNtupleRow(0);
 }

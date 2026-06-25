@@ -2,8 +2,9 @@
 #define ScintSD_h 1
 
 #include "G4VSensitiveDetector.hh"
+#include "G4Threading.hh"
 #include "globals.hh"
-#include <map>
+#include <unordered_map>
 
 class G4Step;
 class G4TouchableHistory;
@@ -18,18 +19,19 @@ public:
     G4bool ProcessHits(G4Step*, G4TouchableHistory*) override;
     void EndOfEvent(G4HCofThisEvent*) override;
 
+    // trackID → categoría canónica ("alpha","Li7","gamma","electron","neutron","proton","other")
+    static G4ThreadLocal std::unordered_map<G4int, G4String>* sTrackParticle;
+
+    // trackID → parentTrackID — permite subir el árbol hasta la primaria
+    static G4ThreadLocal std::unordered_map<G4int, G4int>*   sTrackParent;
+
+    // Devuelve la categoría de la partícula PRIMARIA que originó trackID
+    // (sube el árbol de parentesco hasta parentID == 0)
+    static G4String GetPrimaryForTrack(G4int trackID);
+
 private:
-    // Edep acumulado por tipo de partícula (por evento)
     G4double fEdepTotal   = 0.;
-    G4double fEdepAlpha   = 0.;
-    G4double fEdepLi7     = 0.;
-    G4double fEdepGamma   = 0.;   // gammas + electrones secundarios
-
-    // Conteo de fotones ópticos generados en este evento
-    G4int fNOptPhotons = 0;
-
-    // Edep por TrackID (para ntuple 0 detallado)
-    std::map<G4int, G4double> fEdepPerTrack;
+    G4int    fNOptPhotons = 0;
 };
 
 #endif

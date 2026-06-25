@@ -1,7 +1,8 @@
-#include "G4RunManager.hh"
+#include "G4MTRunManager.hh"
 #include "G4UImanager.hh"
 #include "G4VisExecutive.hh"
 #include "G4UIExecutive.hh"
+#include "G4Threading.hh"
 #include "Randomize.hh"
 
 #include "FTFP_BERT.hh"
@@ -18,7 +19,8 @@ int main(int argc, char** argv)
     if (argc == 1)
         ui = new G4UIExecutive(argc, argv);
 
-    auto* runManager = new G4RunManager();
+    auto* runManager = new G4MTRunManager();
+    runManager->SetNumberOfThreads(G4Threading::G4GetNumberOfCores());
 
     // Detector — tipo configurable desde macro: /scint/type BGO
     runManager->SetUserInitialization(new DetectorConstruction());
