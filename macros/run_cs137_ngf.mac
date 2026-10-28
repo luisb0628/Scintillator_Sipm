@@ -13,6 +13,10 @@
 /gun/inputFile ../../neutron-capture-graphene-boron-geant4/build/output_run_cs137.root
 #/gun/ntuple ParticulasTransmitidas
 
+# Numero de hilos: por defecto se usan todos los nucleos del equipo.
+# Descomentar para fijarlo; debe ir antes de /run/initialize.
+#/run/numberOfThreads 4
+
 /run/initialize
 
 /run/beamOn 2000000
