@@ -4,8 +4,9 @@
 #include "G4UIExecutive.hh"
 #include "G4Threading.hh"
 #include "Randomize.hh"
+#include "TROOT.h"
 
-#include "FTFP_BERT.hh"
+#include "QGSP_BERT_HP.hh"
 #include "G4OpticalPhysics.hh"
 
 #include "ActionInitialization.hh"
@@ -14,6 +15,11 @@
 int main(int argc, char** argv)
 {
     G4Random::setTheSeed(123456789);
+
+    // PrimaryGeneratorAction lee output.root (TFile/TTree) de Film_graphene desde
+    // el constructor de cada hilo worker; sin esto, aperturas de ROOT concurrentes
+    // entre hilos no son seguras.
+    ROOT::EnableThreadSafety();
 
     G4UIExecutive* ui = nullptr;
     if (argc == 1)
@@ -25,12 +31,9 @@ int main(int argc, char** argv)
     // Detector — tipo configurable desde macro: /scint/type BGO
     runManager->SetUserInitialization(new DetectorConstruction());
 
-    // Física EM + hadrónica + óptica.
-    // FTFP_BERT es mucho más rápido de inicializar que QGSP_BERT_HP porque
-    // no carga las tablas de sección eficaz de neutrones de alta precisión.
-    // Los neutrones ya fueron transportados en Film_graphene; aquí solo
-    // necesitamos EM (gammas/e-), iones (α, Li7) y fotones ópticos.
-    auto* physicsList = new FTFP_BERT();
+    // Física EM + hadrónica + óptica: siempre QGSP_BERT_HP (la misma lista de las
+    // tres etapas) más G4OpticalPhysics para el centelleo y los fotones ópticos.
+    auto* physicsList = new QGSP_BERT_HP();
     physicsList->SetVerboseLevel(0);
     physicsList->RegisterPhysics(new G4OpticalPhysics());
     runManager->SetUserInitialization(physicsList);

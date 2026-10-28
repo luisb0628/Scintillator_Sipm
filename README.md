@@ -5,7 +5,7 @@ Simulación Monte Carlo en **Geant4** de un sistema de detección que acopla un 
 Este proyecto es la **tercera etapa** de una cadena de simulación:
 
 1. **Neutron_Thermalization** — genera `AmBePhaseSpace.root`
-2. **Film_graphene** — genera `generated_particles.txt` y `transmitted_particles.txt`
+2. **Film_graphene** — genera `output.root` (ntuples `ProductosCaptura` y `ParticulasTransmitidas`), corre en multinúcleo (MT)
 3. **Scintillator_Sipm** (este repo) — detecta las partículas secundarias en el centellador
 
 ---
@@ -14,9 +14,7 @@ Este proyecto es la **tercera etapa** de una cadena de simulación:
 
 | Macro | Fuente | Uso |
 |-------|--------|-----|
-| `macros/run_calibration.mac` | Pistola estándar (gamma 662 keV, Cs-137) | Calibración del sistema |
-| `macros/run_transmitted.mac` | `transmitted_particles.txt` de Film_graphene | Simulación completa de la cadena |
-| `macros/run.mac` | Configurable | General |
+| `macros/run.mac` | Configurable: pistola estándar, fuentes preset (Co60/Sr90), o phase space (`output.root` de Film_graphene) | General |
 
 ---
 
@@ -28,7 +26,7 @@ Este proyecto es la **tercera etapa** de una cadena de simulación:
 ├── main.cc
 ├── include/
 │   ├── DetectorConstruction.hh   # Geometría centellador + SiPM; 4 tipos de centellador
-│   ├── PrimaryGeneratorAction.hh # Lee transmitted_particles.txt o usa pistola estándar
+│   ├── PrimaryGeneratorAction.hh # Lee output.root (ProductosCaptura/ParticulasTransmitidas) o usa pistola estándar
 │   ├── ScintSD.hh                # Detector sensible del centellador
 │   ├── OpticalSiPM_SD.hh         # Detector óptico del SiPM
 │   ├── RunAction.hh
@@ -37,8 +35,6 @@ Este proyecto es la **tercera etapa** de una cadena de simulación:
 ├── src/
 └── macros/
     ├── run.mac                   # Macro general
-    ├── run_calibration.mac       # Calibración con gamma 662 keV
-    ├── run_transmitted.mac       # Fuente: transmitted_particles.txt de Film_graphene
     └── vis1.mac                  # Visualización
 ```
 
@@ -60,9 +56,10 @@ El tipo se configura con `/scint/type` antes de `/run/initialize`:
 ## Requisitos
 
 - **Geant4** ≥ 10.7 compilado con `ui_all`, `vis_all`, `analysis` y Optical Physics
+- **ROOT** (Core, RIO, Tree) — para leer `output.root` de Film_graphene en `PrimaryGeneratorAction`
 - **CMake** ≥ 3.16, **C++17**
 - **Python 3** con: `uproot`, `numpy`, `pandas`, `matplotlib` (opcional)
-- `transmitted_particles.txt` generado por Film_graphene (para `run_transmitted.mac`)
+- `output.root` generado por Film_graphene (para la fuente de phase space, opción A en `run.mac`)
 
 ---
 
@@ -81,23 +78,25 @@ make -j$(nproc)
 
 ### Calibración (sin Film_graphene)
 
+Comenta la línea `/gun/inputFile ...` en `macros/run.mac` y descomenta la Opción B o C (pistola estándar / fuente preset), luego:
+
 ```bash
 cd build
-./Scintillator_Sipm ../macros/run_calibration.mac
+./Scintillator_Sipm ../macros/run.mac
 ```
 
 Dispara gammas de 662 keV (Cs-137) directamente al centellador.
 
 ### Cadena completa (con Film_graphene)
 
-Primero genera `transmitted_particles.txt` con Film_graphene, luego:
+Primero genera `output.root` con Film_graphene (`./Film_graphene macros/run.mac`, en `neutron-capture-graphene-boron-geant4/build/`). `macros/run.mac` de este proyecto ya apunta directo a esa ruta (`../../neutron-capture-graphene-boron-geant4/build/output.root`) — no hace falta copiarlo. Si en vez de eso usaste `python/run_3configs.py` (que genera `output_<config>.root`), ajusta `/gun/inputFile` a ese nombre.
 
 ```bash
 cd build
-./Scintillator_Sipm ../macros/run_transmitted.mac
+./Scintillator_Sipm ../macros/run.mac
 ```
 
-Lee todas las partículas que llegaron al detector de grafeno (alfa, Li-7, gamma 478 keV, neutrones dispersados, etc.) y las simula en el centellador.
+Lee todas las partículas que llegaron al detector de grafeno (alfa, Li-7, gamma 478 keV, neutrones dispersados, etc. — ntuple `ParticulasTransmitidas`) o solo las nacidas en el grafeno (ntuple `ProductosCaptura`, seleccionable con `/gun/ntuple`) y las simula en el centellador.
 
 ### Modo interactivo
 
@@ -121,7 +120,8 @@ cd build
 /gun/direction 0 0 1
 
 # Modo cadena completa (phase space de Film_graphene)
-/gun/transmittedFile ../../Film_graphene/build/transmitted_particles_kaptonfirst.txt
+/gun/inputFile ../../neutron-capture-graphene-boron-geant4/build/output.root
+/gun/ntuple ParticulasTransmitidas
 
 /run/initialize
 /run/beamOn 10000
@@ -143,7 +143,7 @@ cd build
 | Clase | Responsabilidad |
 |-------|----------------|
 | `DetectorConstruction` | Geometría centellador + SiPM; propiedades ópticas por tipo |
-| `PrimaryGeneratorAction` | Pistola estándar o lectura de `transmitted_particles.txt` |
+| `PrimaryGeneratorAction` | Pistola estándar o lectura de `output.root` (ProductosCaptura/ParticulasTransmitidas) |
 | `ScintSD` | Registra deposición de energía y fotones en el centellador |
 | `OpticalSiPM_SD` | Detecta fotones ópticos en el SiPM |
 | `RunAction` | Gestiona archivos de salida ROOT/CSV |

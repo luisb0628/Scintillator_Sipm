@@ -4,6 +4,9 @@ project(Scintillator_Sipm)
 # --- Encontrar Geant4 ---
 find_package(Geant4 REQUIRED ui_all vis_all analysis)
 
+# --- Encontrar ROOT (para leer output.root de Film_graphene en PrimaryGeneratorAction) ---
+find_package(ROOT REQUIRED COMPONENTS Core RIO Tree)
+
 # --- Incluir directorios de encabezados ---
 include(${Geant4_USE_FILE})
 include_directories(${PROJECT_SOURCE_DIR}/include)
@@ -22,8 +25,9 @@ set(SOURCES
 # --- Ejecutable principal ---
 add_executable(Scintillator_Sipm main.cc ${SOURCES})
 
-# --- Enlazar librerías de Geant4 ---
-target_link_libraries(Scintillator_Sipm ${Geant4_LIBRARIES})
+# --- Enlazar librerías de Geant4 + ROOT ---
+target_link_libraries(Scintillator_Sipm ${Geant4_LIBRARIES} ROOT::Core ROOT::RIO ROOT::Tree)
+target_include_directories(Scintillator_Sipm PRIVATE ${ROOT_INCLUDE_DIRS})
 
 # --- Copiar directorio de macros al build ---
 file(COPY ${PROJECT_SOURCE_DIR}/macros DESTINATION ${PROJECT_BINARY_DIR})

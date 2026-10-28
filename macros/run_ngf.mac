@@ -1,0 +1,18 @@
+/control/verbose 0
+/run/verbose 0
+/event/verbose 0
+/tracking/verbose 0
+
+# Generado automaticamente para la corrida pareada con/sin grafeno.
+# Identico a run.mac pero apuntando al output SIN grafeno.
+# NOTA 2026-10: fuente AmBe separada (sin el gamma de 4.438 MeV del carbono,
+# eliminado de neutron-thermalization-geant4) -- ver output_run.root.
+
+/scint/type BGO
+
+/gun/inputFile ../../neutron-capture-graphene-boron-geant4/build/output_run.root
+#/gun/ntuple ParticulasTransmitidas
+
+/run/initialize
+
+/run/beamOn 2000000

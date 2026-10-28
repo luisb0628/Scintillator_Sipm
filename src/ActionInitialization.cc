@@ -12,7 +12,10 @@ ActionInitialization::ActionInitialization()
                                         "Configuracion de la fuente de particulas");
 
     fMessenger->DeclareProperty("inputFile", fInputFile,
-        "Phase space: ruta a generated_particles.txt o transmitted_particles.txt");
+        "Phase space: ruta a output.root de Film_graphene (ntuple ProductosCaptura o ParticulasTransmitidas)");
+
+    fMessenger->DeclareProperty("ntuple", fNtupleName,
+        "Nombre del ntuple a leer en inputFile: ParticulasTransmitidas (default) o ProductosCaptura");
 
     fMessenger->DeclareProperty("source", fSource,
         "Fuente calibracion preset: Co60 (1173+1332 keV), Sr90 (espectro beta)");
@@ -34,6 +37,9 @@ void ActionInitialization::Build() const
 
     // Si se especificó archivo, activa modo kFile.
     if (!fInputFile.empty()) gen->SetInputFile(fInputFile);
+
+    // Nombre de ntuple (opcional, default "ParticulasTransmitidas" en PrimaryGeneratorAction).
+    if (!fNtupleName.empty()) gen->SetNtupleName(fNtupleName);
 
     // Si se especificó fuente preset (Co60, Sr90), activa el modo correspondiente.
     // Tiene precedencia sobre inputFile si ambos están en el macro.

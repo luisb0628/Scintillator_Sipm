@@ -32,7 +32,7 @@
 # Decorations
 /vis/set/textColour green
 /vis/set/textLayout right
-/vis/scene/add/text2D 0 0 20 ! ! Step 3 : Scintillator and Simp
+/vis/scene/add/text2D 0.5 -.9 24 ! ! Step 3 : Scintillator and Simp
 /vis/set/textLayout
 /vis/set/textColour
 

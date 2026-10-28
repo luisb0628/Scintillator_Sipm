@@ -15,7 +15,8 @@ class ActionInitialization : public G4VUserActionInitialization {
 
   private:
     G4GenericMessenger* fMessenger = nullptr;
-    mutable G4String    fInputFile;   // /gun/inputFile  — generated o transmitted
+    mutable G4String    fInputFile;   // /gun/inputFile  — ruta a output.root de Film_graphene
+    mutable G4String    fNtupleName;  // /gun/ntuple     — ParticulasTransmitidas (default) o ProductosCaptura
     mutable G4String    fSource;      // /gun/source     — Co60, Sr90
 };
 

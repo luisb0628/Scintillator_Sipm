@@ -6,12 +6,24 @@
 #include "G4SystemOfUnits.hh"
 #include "G4Event.hh"
 #include "G4ios.hh"
+#include "G4AutoLock.hh"
 #include "Randomize.hh"
 
-#include <fstream>
-#include <sstream>
+#include "TFile.h"
+#include "TTree.h"
+
+#include <unordered_map>
 #include <cctype>
 #include <cmath>
+
+// ── Estado compartido entre todos los hilos worker ──────────────────────────
+// Ver comentario en el header: el phase space se carga UNA vez y se comparte
+// (solo lectura tras la carga) en vez de una copia por hilo.
+G4Mutex  PrimaryGeneratorAction::sLoadMutex = G4MUTEX_INITIALIZER;
+G4bool   PrimaryGeneratorAction::sLoaded    = false;
+G4String PrimaryGeneratorAction::sLoadedFile;
+G4String PrimaryGeneratorAction::sLoadedNtuple;
+std::vector<std::vector<PhaseSpaceParticle>> PrimaryGeneratorAction::sEvents;
 
 PrimaryGeneratorAction::PrimaryGeneratorAction()
     : G4VUserPrimaryGeneratorAction()
@@ -36,9 +48,15 @@ PrimaryGeneratorAction::~PrimaryGeneratorAction()
 void PrimaryGeneratorAction::SetInputFile(const G4String& path)
 {
     fInputFile = path;
-    fLoaded    = false;
-    fEvents.clear();
     fMode      = GunMode::kFile;
+    // La carga real (y el reset de sEvents si el archivo cambio) ocurre en
+    // LoadFile(), protegida por sLoadMutex — ver comentario en el header.
+}
+
+// ---------------------------------------------------------------------------
+void PrimaryGeneratorAction::SetNtupleName(const G4String& name)
+{
+    fNtupleName = name;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,72 +98,95 @@ void PrimaryGeneratorAction::SetSource(const G4String& src)
 }
 
 // ---------------------------------------------------------------------------
-// Lee generated_particles.txt o transmitted_particles.txt.
-// Formato común (ambos archivos desde la Etapa 2):
-//   EventID Name Ekin_MeV DirX DirY DirZ PosX_cm PosY_cm PosZ_cm Creator TargetZ TargetA
+// Lee output.root de Film_graphene (ntuple "ParticulasTransmitidas" o
+// "ProductosCaptura", ver RunAction.cc de neutron-capture-graphene-boron-geant4):
+//   EventID(int)  ParticleType(string)  KineticEnergy_MeV(double)  DirX DirY DirZ ...
+//
+// Se agrupa por EventID con un unordered_map (no por adyacencia de filas):
+// Film_graphene corre en modo MT, así que las filas de un mismo evento pueden
+// llegar intercaladas entre hilos al fusionar el ntuple — asumir orden habría
+// partido eventos con varias secundarias (alpha + gamma, etc.) en grupos sueltos.
 // ---------------------------------------------------------------------------
 void PrimaryGeneratorAction::LoadFile()
 {
+    G4AutoLock lock(&sLoadMutex);
+
+    // Otro hilo ya cargo este mismo archivo/ntuple mientras esperabamos el lock.
+    if (sLoaded && sLoadedFile == fInputFile && sLoadedNtuple == fNtupleName) return;
+
     if (fInputFile.empty()) {
         G4Exception("PrimaryGeneratorAction::LoadFile", "NoFile",
                     FatalException,
                     "No se especifico archivo de phase space.\n"
                     "Usa en el macro:\n"
-                    "  /gun/inputFile ../build/macros/generated_particles.txt\n"
-                    "  /gun/inputFile ../build/macros/transmitted_particles.txt");
+                    "  /gun/inputFile ../../neutron-capture-graphene-boron-geant4/build/output.root\n"
+                    "  /gun/ntuple ParticulasTransmitidas   (o ProductosCaptura)");
     }
 
-    std::ifstream in(fInputFile);
-    if (!in.is_open()) {
+    TFile* file = TFile::Open(fInputFile.c_str(), "READ");
+    if (!file || file->IsZombie()) {
         G4String msg = "No se puede abrir: " + fInputFile;
+        if (file) { file->Close(); delete file; }
         G4Exception("PrimaryGeneratorAction::LoadFile", "FileError",
                     FatalException, msg);
     }
 
-    G4cout << "\n[PrimaryGenerator] Cargando " << fInputFile << G4endl;
+    TTree* tree = dynamic_cast<TTree*>(file->Get(fNtupleName.c_str()));
+    if (!tree) {
+        G4String msg = "Ntuple '" + fNtupleName + "' no encontrado en " + fInputFile;
+        file->Close(); delete file;
+        G4Exception("PrimaryGeneratorAction::LoadFile", "NtupleError",
+                    FatalException, msg);
+    }
 
-    std::string line;
-    int prevID = -1;
-    std::vector<PhaseSpaceParticle> group;
+    G4cout << "\n[PrimaryGenerator] Cargando " << fInputFile
+           << "  (ntuple: " << fNtupleName << ")" << G4endl;
 
-    while (std::getline(in, line)) {
-        if (line.empty() || line[0] == '#') continue;
+    int    evID;
+    char   particleType[64];
+    double kinE, dirX, dirY, dirZ, posX, posY;
 
-        std::istringstream ss(line);
-        int    evID;
-        std::string pname;
-        double ekin, dx, dy, dz, px, py, pz;
-        std::string creator;
-        int tz, ta;
+    tree->SetBranchAddress("EventID",           &evID);
+    tree->SetBranchAddress("ParticleType",      particleType);
+    tree->SetBranchAddress("KineticEnergy_MeV", &kinE);
+    tree->SetBranchAddress("DirX",              &dirX);
+    tree->SetBranchAddress("DirY",              &dirY);
+    tree->SetBranchAddress("DirZ",              &dirZ);
+    tree->SetBranchAddress("PosX_cm",           &posX);
+    tree->SetBranchAddress("PosY_cm",           &posY);
 
-        if (!(ss >> evID >> pname >> ekin >> dx >> dy >> dz
-                 >> px >> py >> pz >> creator >> tz >> ta))
-            continue;
+    std::unordered_map<int, std::vector<PhaseSpaceParticle>> grouped;
+    Long64_t nEntries = tree->GetEntries();
 
-        if (ekin <= 0.) continue;
-
-        if (evID != prevID) {
-            if (!group.empty()) fEvents.push_back(group);
-            group.clear();
-            prevID = evID;
-        }
+    for (Long64_t i = 0; i < nEntries; ++i) {
+        tree->GetEntry(i);
+        if (kinE <= 0.) continue;
 
         PhaseSpaceParticle p;
-        p.name   = pname;
-        p.energy = ekin;
-        p.dx = dx; p.dy = dy; p.dz = dz;
-        group.push_back(p);
+        p.name   = particleType;
+        p.energy = kinE;
+        p.dx = dirX; p.dy = dirY; p.dz = dirZ;
+        p.x  = posX; p.y  = posY;
+        grouped[evID].push_back(p);
     }
-    if (!group.empty()) fEvents.push_back(group);
 
-    if (fEvents.empty()) {
+    file->Close();
+    delete file;
+
+    sEvents.clear();
+    sEvents.reserve(grouped.size());
+    for (auto& kv : grouped) sEvents.push_back(std::move(kv.second));
+
+    if (sEvents.empty()) {
         G4Exception("PrimaryGeneratorAction::LoadFile", "EmptyFile",
                     FatalException,
-                    "El archivo no contiene eventos validos (E>0).");
+                    "El ntuple no contiene eventos validos (E>0).");
     }
 
-    G4cout << "[PrimaryGenerator] Grupos cargados: " << fEvents.size() << G4endl;
-    fLoaded = true;
+    G4cout << "[PrimaryGenerator] Grupos cargados: " << sEvents.size() << G4endl;
+    sLoadedFile   = fInputFile;
+    sLoadedNtuple = fNtupleName;
+    sLoaded       = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,17 +230,18 @@ G4double PrimaryGeneratorAction::SampleBetaEnergy(G4double Q, G4double fmax)
 // ---------------------------------------------------------------------------
 void PrimaryGeneratorAction::GeneratePrimaries(G4Event* event)
 {
-    // Archivo (captura B-10): film pegado al centellador → 10 µm de aire.
+    // Archivo (captura B-10): film pegado al centellador → 10 µm de aire; la posicion (x, y) de cada
+    // particula es la del plano del detector de la etapa 2, con el eje del film en el eje del cristal.
     // Calibración: fuente externa → 1 mm de aire (irrelevante para gammas/e-).
-    const G4ThreeVector gunPosFile(0., 0., -0.01*mm);   // ~10 µm
+    const G4double      gunZFile = -0.01*mm;            // ~10 µm
     const G4ThreeVector gunPosCalib(0., 0., -1.*mm);
     const G4ThreeVector gunDir(0., 0., 1.);
 
-    // ── Modo archivo: generated_particles.txt o transmitted_particles.txt ────
+    // ── Modo archivo: output.root de Film_graphene (ProductosCaptura/ParticulasTransmitidas) ──
     if (fMode == GunMode::kFile) {
-        if (!fLoaded) LoadFile();
+        if (!sLoaded || sLoadedFile != fInputFile || sLoadedNtuple != fNtupleName) LoadFile();
 
-        const auto& grp = fEvents[event->GetEventID() % (G4int)fEvents.size()];
+        const auto& grp = sEvents[event->GetEventID() % (G4int)sEvents.size()];
         for (const auto& p : grp) {
             G4ParticleDefinition* def = FindParticleDef(p.name);
             if (!def) {
@@ -209,7 +251,7 @@ void PrimaryGeneratorAction::GeneratePrimaries(G4Event* event)
             fParticleGun->SetParticleDefinition(def);
             fParticleGun->SetParticleEnergy(p.energy * MeV);
             fParticleGun->SetParticleMomentumDirection(G4ThreeVector(p.dx, p.dy, p.dz));
-            fParticleGun->SetParticlePosition(gunPosFile);
+            fParticleGun->SetParticlePosition(G4ThreeVector(p.x*cm, p.y*cm, gunZFile));
             fParticleGun->GeneratePrimaryVertex(event);
         }
         return;

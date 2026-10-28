@@ -16,11 +16,17 @@
 
 # ── Fuente ──────────────────────────────────────────────────────────────────
 #
-# OPCIÓN A — Phase space (señal pura de captura B-10):
-#/gun/inputFile ../build/macros/generated_particles.txt
+# OPCIÓN A — Phase space desde output.root de Film_graphene (neutron-capture-graphene-boron-geant4):
+#   /gun/ntuple selecciona el ntuple ("ParticulasTransmitidas" es el default, no hace falta declararlo)
 #
-# OPCIÓN A — Phase space (espectro completo AmBe transmitido):
-#/gun/inputFile ../build/macros/transmitted_particles_singf.txt
+# Señal pura de captura B-10 (secundarias nacidas en el grafeno):
+#/gun/inputFile ../../neutron-capture-graphene-boron-geant4/build/output.root
+#/gun/ntuple ProductosCaptura
+#
+# Espectro completo AmBe transmitido (todo lo que llega al detector):
+# NOTA 2026-10: fuente AmBe separada (sin el gamma de 4.438 MeV del carbono).
+/gun/inputFile ../../neutron-capture-graphene-boron-geant4/build/output_run_g.root
+#/gun/ntuple ParticulasTransmitidas
 #
 # OPCIÓN B — Calibración gamma puntual (usa comandos estándar de G4ParticleGun):
 #   Cs-137:
@@ -34,7 +40,7 @@
 #   Co60:  dos gammas en cascada  1173.2 + 1332.5 keV  (un par por evento)
 #   Sr90:  espectro beta Sr-90/Y-90 en equilibrio secular  (un e- por evento)
 #          50 % Sr-90 (Q = 0.546 MeV) + 50 % Y-90 (Q = 2.280 MeV)
-/gun/source Cs137
+#/gun/source Cs137
 #/gun/source Co60
 #/gun/source Sr90
 
@@ -42,8 +48,8 @@
 /run/initialize
 
 # ── Número de eventos ────────────────────────────────────────────────────────
-# Calibración Cs-137 / Co-60:   100 000 – 500 000  (~5-25 min)
-# Calibración Sr-90 beta:       500 000 – 1 000 000
-# Phase space (generated):      usa el nº de grupos del archivo (se cicla si pones más)
-# Phase space (transmitted):    idem
+# Calibración Cs-137 / Co-60:      100 000 – 500 000  (~5-25 min)
+# Calibración Sr-90 beta:          500 000 – 1 000 000
+# Phase space (ProductosCaptura):  usa el nº de grupos del ntuple (se cicla si pones más)
+# Phase space (ParticulasTransmitidas): idem
 /run/beamOn 100000
