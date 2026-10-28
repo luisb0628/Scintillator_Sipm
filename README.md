@@ -1,167 +1,129 @@
-# Centellador + SiPM para Detección de Partículas Secundarias (Geant4)
+# Cristal centelleador con SiPM (Geant4)
 
-Simulación Monte Carlo en **Geant4** de un sistema de detección que acopla un **cristal centellador** a un **SiPM**, diseñado para detectar las partículas secundarias producidas por la captura de neutrones en grafeno dopado con boro.
+Simulación Monte Carlo en **Geant4** de la respuesta de un **cristal centelleador acoplado a un SiPM** a las partículas que salen de una película de grafeno dopado con boro. El programa transporta el centelleo como fotones ópticos hasta el SiPM, cuenta los fotoelectrones de cada evento y los atribuye a la partícula primaria que los originó.
 
-Este proyecto es la **tercera etapa** de una cadena de simulación:
+Es la **tercera etapa** de una cadena de tres simulaciones:
 
-1. **Neutron_Thermalization** — genera `AmBePhaseSpace.root`
-2. **Film_graphene** — genera `output.root` (ntuples `ProductosCaptura` y `ParticulasTransmitidas`), corre en multinúcleo (MT)
-3. **Scintillator_Sipm** (este repo) — detecta las partículas secundarias en el centellador
-
----
-
-## Modos de operación
-
-| Macro | Fuente | Uso |
-|-------|--------|-----|
-| `macros/run.mac` | Configurable: pistola estándar, fuentes preset (Co60/Sr90), o phase space (`output.root` de Film_graphene) | General |
+| Etapa | Repositorio | Entrada | Salida |
+|---|---|---|---|
+| 1. Termalización | [neutron-thermalization-geant4](https://github.com/luisb0628/neutron-thermalization-geant4) | — | `AmBePhaseSpace.root`, `Cs137PhaseSpace.root` |
+| 2. Captura | [neutron-capture-graphene-boron-geant4](https://github.com/luisb0628/neutron-capture-graphene-boron-geant4) | phase space de la etapa 1 | `output.root` |
+| 3. Centelleador | **Scintillator_Sipm** (este) | `output.root` de la etapa 2 | `output.root` |
 
 ---
 
-## Contenido del repositorio
+## Física y geometría
 
-```
-.
-├── CMakeLists.txt
-├── main.cc
-├── include/
-│   ├── DetectorConstruction.hh   # Geometría centellador + SiPM; 4 tipos de centellador
-│   ├── PrimaryGeneratorAction.hh # Lee output.root (ProductosCaptura/ParticulasTransmitidas) o usa pistola estándar
-│   ├── ScintSD.hh                # Detector sensible del centellador
-│   ├── OpticalSiPM_SD.hh         # Detector óptico del SiPM
-│   ├── RunAction.hh
-│   ├── EventAction.hh
-│   └── ActionInitialization.hh
-├── src/
-└── macros/
-    ├── run.mac                   # Macro general
-    └── vis1.mac                  # Visualización
-```
+**Lista de física:** `QGSP_BERT_HP` (la misma de las tres etapas) más `G4OpticalPhysics`, para el centelleo y el transporte de los fotones ópticos (absorción, reflexión y refracción en las superficies).
 
----
+**Cristal.** BGO de (6 × 6 × 15) mm³, con la cara frontal en *z* = 0, dentro de un mundo de aire de 20 cm de lado. Va envuelto en teflón, modelado como una superficie óptica rugosa con reflectividad de 0,95 en todas las caras menos la del SiPM. Propiedades asignadas al BGO: 8200 fotones por MeV, emisión gaussiana centrada en 2,56 eV (484 nm), tiempo de decaimiento de 300 ns, índice de refracción de 2,15, longitud de absorción de 25 cm y constante de Birks de 0,012 mm/MeV.
 
-## Tipos de centellador
+**Otros centelleadores** (`/scint/type`): `PLASTIC` (10 000 fotones/MeV, 2,1 ns), `PLASTIC_B` (6500 fotones/MeV, 2,5 ns), `CSI` (54 000 fotones/MeV, 1000 ns) y `LYSO` (32 000 fotones/MeV, 40 ns).
 
-El tipo se configura con `/scint/type` antes de `/run/initialize`:
+**SiPM.** Capa de silicio de 1 mm del mismo tamaño transversal que el cristal y con su índice de refracción, así que no hay reflexión de Fresnel en la unión. Detecta cada fotón que llega con una probabilidad de 30 % (PDE constante con la longitud de onda), y cada fotón detectado es un fotoelectrón. **No se modelan** el ruido oscuro, la diafonía, el *afterpulsing* ni la saturación de microceldas.
 
-| Tipo | Pico emisión | Índice refracción | Yield (fotones/MeV) | τ (ns) |
-|------|-------------|-------------------|---------------------|--------|
-| `BGO` (default) | 485 nm | 2.15 | 8 200 | 300 |
-| `PLASTIC` | 425 nm | 1.58 | 10 000 | 2.1 |
-| `CSI` | 550 nm | 1.80 | 54 000 | 1 000 |
-| `LYSO` | 440 nm | 1.82 | 32 000 | 40 |
+**Primarios.**
+- **Cadena completa:** se leen las partículas que salen de la película en la etapa 2. Se agrupan por `EventID`, así que todas las de un mismo evento de la etapa 2 forman un evento aquí, y se recorren de forma cíclica. Cada una nace 10 µm antes de la cara frontal del cristal, con su posición en el plano del detector, su energía y su dirección. Como el cristal mide 6 × 6 mm, solo entran las que salen por la zona central.
+- **Calibración:** una pistola estándar de Geant4 (por ejemplo, γ de 0,661657 MeV desde 1 mm delante del cristal) o una fuente predefinida (`/gun/source Cs137 | Co60 | Sr90`).
 
 ---
 
 ## Requisitos
 
-- **Geant4** ≥ 10.7 compilado con `ui_all`, `vis_all`, `analysis` y Optical Physics
-- **ROOT** (Core, RIO, Tree) — para leer `output.root` de Film_graphene en `PrimaryGeneratorAction`
-- **CMake** ≥ 3.16, **C++17**
-- **Python 3** con: `uproot`, `numpy`, `pandas`, `matplotlib` (opcional)
-- `output.root` generado por Film_graphene (para la fuente de phase space, opción A en `run.mac`)
+- **Geant4 11** con física óptica, datos HP, `analysis` y, para visualizar, `ui_all` y `vis_all`.
+- **ROOT**, para leer el `output.root` de la etapa 2 en `PrimaryGeneratorAction`.
+- **CMake** ≥ 3.16 y un compilador **C++17**.
+- **Python 3** con `uproot`, `numpy` y `pandas`, para el análisis.
+
+Las corridas de la tesis se hicieron en Docker con la imagen `luisb28/geant4-clase:11.4-python`, montando la carpeta que contiene los tres repositorios en `/workspace`.
 
 ---
 
-## Compilación
+## Compilación y ejecución
 
 ```bash
-source /path/to/geant4/install/bin/geant4.sh
+source /ruta/a/geant4/bin/geant4.sh
 mkdir -p build && cd build
 cmake ..
 make -j$(nproc)
+
+./Scintillator_Sipm ../macros/run_gf.mac    # cadena completa: película con boro
+./Scintillator_Sipm                         # modo interactivo con visualización
 ```
 
----
+El programa usa varios hilos y siempre escribe `output.root` en la carpeta donde se ejecuta. Para conservar varias corridas, renombra el archivo después de cada una.
 
-## Ejecución
+**Calibración con la pistola estándar.** En modo multihilo, los comandos `/gun/particle`, `/gun/energy`, `/gun/position` y `/gun/direction` deben ir **después** de `/run/initialize`; antes de esa línea Geant4 responde `COMMAND NOT FOUND`. Ejemplo:
 
-### Calibración (sin Film_graphene)
-
-Comenta la línea `/gun/inputFile ...` en `macros/run.mac` y descomenta la Opción B o C (pistola estándar / fuente preset), luego:
-
-```bash
-cd build
-./Scintillator_Sipm ../macros/run.mac
 ```
-
-Dispara gammas de 662 keV (Cs-137) directamente al centellador.
-
-### Cadena completa (con Film_graphene)
-
-Primero genera `output.root` con Film_graphene (`./Film_graphene macros/run.mac`, en `neutron-capture-graphene-boron-geant4/build/`). `macros/run.mac` de este proyecto ya apunta directo a esa ruta (`../../neutron-capture-graphene-boron-geant4/build/output.root`) — no hace falta copiarlo. Si en vez de eso usaste `python/run_3configs.py` (que genera `output_<config>.root`), ajusta `/gun/inputFile` a ese nombre.
-
-```bash
-cd build
-./Scintillator_Sipm ../macros/run.mac
-```
-
-Lee todas las partículas que llegaron al detector de grafeno (alfa, Li-7, gamma 478 keV, neutrones dispersados, etc. — ntuple `ParticulasTransmitidas`) o solo las nacidas en el grafeno (ntuple `ProductosCaptura`, seleccionable con `/gun/ntuple`) y las simula en el centellador.
-
-### Modo interactivo
-
-```bash
-cd build
-./Scintillator_Sipm
-```
-
----
-
-## Comandos del macro
-
-```bash
-# Tipo de centellador
-/scint/type BGO          # BGO | PLASTIC | CSI | LYSO
-
-# Modo calibración (pistola estándar)
-/gun/particle gamma
-/gun/energy 662 keV
-/gun/position 0 0 -1 cm
-/gun/direction 0 0 1
-
-# Modo cadena completa (phase space de Film_graphene)
-/gun/inputFile ../../neutron-capture-graphene-boron-geant4/build/output.root
-/gun/ntuple ParticulasTransmitidas
-
+/scint/type BGO
 /run/initialize
-/run/beamOn 10000
+/gun/particle gamma
+/gun/energy 661.657 keV
+/gun/position 0 0 -1 mm
+/gun/direction 0 0 1
+/run/beamOn 100000
 ```
 
 ---
 
-## Resultados generados
+## Macros
 
-- Espectros de deposición de energía en el centellador
-- Conteo de fotones ópticos detectados por el SiPM
-- Distribuciones espaciales
-- Espectros de α, Li-7 y gamma 478 keV (captura B-10)
+| Macro | Entrada (etapa 2) | Caso |
+|---|---|---|
+| `macros/run_gf.mac` | `output_run_g.root` | primarios del AmBe, Kapton + grafeno con boro |
+| `macros/run_ngf.mac` | `output_run.root` | primarios del AmBe, sin grafeno |
+| `macros/run_cs137_gf.mac` | `output_run_cs137_g.root` | primarios del ¹³⁷Cs, Kapton + grafeno con boro |
+| `macros/run_cs137_ngf.mac` | `output_run_cs137.root` | primarios del ¹³⁷Cs, sin grafeno |
+| `macros/run.mac` | configurable | macro general comentada (phase space, pistola o fuente predefinida) |
+| `macros/vis1.mac` | — | visualización |
+
+Las macros de la cadena usan un cristal de BGO y 2×10⁶ eventos, y leen los archivos de `../../neutron-capture-graphene-boron-geant4/build/`.
+
+### Comandos
+
+| Comando | Descripción |
+|---|---|
+| `/scint/type BGO \| PLASTIC \| PLASTIC_B \| CSI \| LYSO` | Material del cristal (antes de `/run/initialize`) |
+| `/gun/inputFile <ruta>` | `output.root` de la etapa 2 que alimenta los primarios |
+| `/gun/ntuple ParticulasTransmitidas \| ProductosCaptura` | Tabla que se lee del archivo (por defecto, `ParticulasTransmitidas`) |
+| `/gun/source Cs137 \| Co60 \| Sr90` | Fuente de calibración predefinida (Co-60: γ de 1,1732 y 1,3325 MeV en cascada; Sr-90: espectro β de Sr-90/Y-90) |
+
+---
+
+## Salida (`output.root`)
+
+| Tabla | Contenido |
+|---|---|
+| `ScintEvent` | Por evento: energía depositada en el cristal (`TotalEdep_keV`) y número de fotones ópticos producidos (`nOptPhotons`). |
+| `SiPMSummary` | Por evento: fotoelectrones totales (`nPE_total`) y su reparto según la primaria que los originó (`nPE_alpha`, `nPE_Li7`, `nPE_gamma`, `nPE_electron`, `nPE_neutron`, `nPE_proton`, `nPE_other`). La atribución sube por el árbol de parentesco: un γ que produce un electrón Compton que centellea cuenta como γ. |
+| `SiPMData` | Tiempo (`time_ns`) y energía (`energy_eV`) de cada fotón detectado, con la primaria de origen. Solo se guarda para los primeros 10 000 eventos. |
+
+La calibración en energía se hace aparte, en el análisis: se ajusta una gaussiana al fotopico del ¹³⁷Cs en `nPE_total` y se convierten los fotoelectrones a MeV.
 
 ---
 
 ## Estructura del código
 
 | Clase | Responsabilidad |
-|-------|----------------|
-| `DetectorConstruction` | Geometría centellador + SiPM; propiedades ópticas por tipo |
-| `PrimaryGeneratorAction` | Pistola estándar o lectura de `output.root` (ProductosCaptura/ParticulasTransmitidas) |
-| `ScintSD` | Registra deposición de energía y fotones en el centellador |
-| `OpticalSiPM_SD` | Detecta fotones ópticos en el SiPM |
-| `RunAction` | Gestiona archivos de salida ROOT/CSV |
-| `EventAction` | Inicialización por evento |
+|---|---|
+| `DetectorConstruction` | Cristal, envoltura de teflón, SiPM y propiedades ópticas de cada centelleador; comando `/scint/type` |
+| `PrimaryGeneratorAction` | Lee el phase space de la etapa 2 (agrupado por evento), o usa la pistola estándar o una fuente predefinida; comandos `/gun/inputFile`, `/gun/ntuple` y `/gun/source` |
+| `ScintSD` | Energía depositada y fotones producidos en el cristal |
+| `OpticalSiPM_SD` | Detección de fotones en el SiPM con la PDE y atribución a la primaria |
+| `RunAction` / `EventAction` | Archivo ROOT, tablas y estado por evento |
 
 ---
 
-## Trabajo futuro
+## Limitaciones
 
-- PDE realista del SiPM
-- Crosstalk y afterpulsing
-- Variación del dopaje de boro
-- Integración con kits CAEN
+- La PDE del SiPM es constante: no depende de la longitud de onda.
+- No hay ruido oscuro, diafonía, *afterpulsing* ni saturación de microceldas, así que el ancho de los picos solo incluye la estadística de los fotoelectrones y la variación de la luz recogida según el punto de interacción.
+- El rendimiento luminoso se asigna constante con la energía. La constante de Birks se fija en el material, pero el código no registra un `G4EmSaturation` en `G4Scintillation`, así que no hay que contar con que reduzca la luz.
 
 ---
 
-## Contacto
+## Autor
 
-Proyecto desarrollado por **Luis Ricardo Beltrán García**  
-Maestría en Ingeniería Física — UAN  
+**Luis Ricardo Beltrán García** — Maestría en Ingeniería Física, Universidad Antonio Nariño (UAN)
 lbeltran151@uan.edu.mx
